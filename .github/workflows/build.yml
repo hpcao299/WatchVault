@@ -1,0 +1,59 @@
+name: Build Watch Vault
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '^16.0' # This will grab the latest 16.x version available
+    
+      - name: Install Build Tools
+        env:
+          HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+        run: brew install xcodegen
+
+      - name: Setup App Icon
+        run: |
+          mkdir -p Sources/Assets.xcassets/AppIcon.appiconset
+          
+          # 1. Initialize the root asset catalog (prevents structural warnings)
+          echo '{"info":{"author":"xcode","version":1}}' > Sources/Assets.xcassets/Contents.json
+          
+          # 2. Resize the original image to EXACTLY 1024x1024 using macOS's built-in sips tool
+          sips -z 1024 1024 icon.png --out Sources/Assets.xcassets/AppIcon.appiconset/icon_1024.png
+          
+          # 3. Use the modern Single Size format linking to the perfectly sized image
+          echo '{"images":[{"filename":"icon_1024.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > Sources/Assets.xcassets/AppIcon.appiconset/Contents.json
+      
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build App (Unsigned)
+        run: |
+          xcodebuild clean build \
+            -project Watch.xcodeproj \
+            -scheme Watch \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED="NO" \
+            CODE_SIGNING_ALLOWED="NO" \
+            CONFIGURATION_BUILD_DIR="$(pwd)/build"
+            
+      - name: Package into IPA
+        run: |
+          mkdir Payload
+          cp -r build/Watch.app Payload/
+          zip -qr Watch.ipa Payload
+          
+      - name: Upload IPA for Download
+        uses: actions/upload-artifact@v4
+        with:
+          name: Watch-App
+          path: Watch.ipa
